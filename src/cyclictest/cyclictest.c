@@ -826,6 +826,7 @@ static void display_help(int error)
 	       "cyclictest <options>\n\n"
 	       "-a [NUM] --affinity        run thread #N on processor #N, if possible\n"
 	       "                           with NUM pin all threads to the processor NUM\n"
+	       "-A [MSK] --affinity_msk    run only threads on the cpus in the mask"
 	       "-b USEC  --breaktrace=USEC send break trace command when latency > USEC\n"
 	       "-B       --preemptirqs     both preempt and irqsoff tracing (used with -b)\n"
 	       "-c CLOCK --clock=CLOCK     select clock\n"
@@ -898,7 +899,8 @@ static int smp = 0;
 enum {
 	AFFINITY_UNSPECIFIED,
 	AFFINITY_SPECIFIED,
-	AFFINITY_USEALL
+	AFFINITY_USEALL,
+	AFFINITY_USEMASK,
 };
 static int setaffinity = AFFINITY_UNSPECIFIED;
 
@@ -960,6 +962,7 @@ static void process_options (int argc, char *argv[])
 		/** Options for getopt */
 		static struct option long_options[] = {
 			{"affinity", optional_argument, NULL, 'a'},
+			{"affinity_mask", required_argument, NULL, 'A'},
 			{"breaktrace", required_argument, NULL, 'b'},
 			{"preemptirqs", no_argument, NULL, 'B'},
 			{"clock", required_argument, NULL, 'c'},
@@ -998,7 +1001,7 @@ static void process_options (int argc, char *argv[])
 			{"latency", required_argument, NULL, 'e'},
 			{NULL, 0, NULL, 0}
 		};
-		int c = getopt_long(argc, argv, "a::b:Bc:Cd:Efh:H:i:Il:MnNo:O:p:PmqrsSt::uUvD:wWT:y:e:",
+		int c = getopt_long(argc, argv, "a::A:b:Bc:Cd:Efh:H:i:Il:MnNo:O:p:PmqrsSt::uUvD:wWT:y:e:",
 				    long_options, &option_index);
 		if (c == -1)
 			break;
@@ -1017,6 +1020,17 @@ static void process_options (int argc, char *argv[])
 			} else {
 				setaffinity = AFFINITY_USEALL;
 			}
+			break;
+		case 'A':
+			if (sscanf(optarg, "%lx", &affinity_mask) != 1) {
+				warn("-A unabled to retrieve affinity mask\n");
+				break;
+			}
+			if (!affinity_mask) {
+				warn("-A empty affinity mask\n");
+				break;
+			}
+			setaffinity = AFFINITY_USEMASK;
 			break;
 		case 'b': tracelimit = atoi(optarg); break;
 		case 'B': tracetype = PREEMPTIRQSOFF; break;
@@ -1134,7 +1148,26 @@ static void process_options (int argc, char *argv[])
 			    affinity, max_cpus);
 			error = 1;
 		}
-	} else if (tracelimit)
+	}
+
+	if (setaffinity == AFFINITY_USEMASK) {
+		unsigned long mask = affinity_mask;
+		num_threads = 0;
+		int cnt, last;
+
+		for (cnt = 0, last = 0; mask; cnt++, mask >>= 1) {
+			if (mask & 0x01) {
+				num_threads++;
+				last = cnt;
+			}
+		}
+		if (last >= max_cpus) {
+			warn("-A affinity mask specified unavailable cpu\n");
+			error = 1;
+		}
+	}
+
+	if (tracelimit)
 		fileprefix = procfileprefix;
 
 	if (clockdev_fd < 0 &&
@@ -1357,7 +1390,7 @@ int main(int argc, char **argv)
 	struct thread_stat **statistics;
 	int max_cpus = sysconf(_SC_NPROCESSORS_CONF);
 	int i, ret = -1;
-	int status;
+	int status, mask_idx = 0;
 
 	process_options(argc, argv);
 
@@ -1500,6 +1533,10 @@ int main(int argc, char **argv)
 		case AFFINITY_UNSPECIFIED: par->cpu = -1; break;
 		case AFFINITY_SPECIFIED: par->cpu = affinity; break;
 		case AFFINITY_USEALL: par->cpu = i % max_cpus; break;
+		case AFFINITY_USEMASK:
+			while (!(affinity_mask & (1UL << mask_idx)))
+			       mask_idx++;
+			par->cpu = mask_idx++;
 		}
 		stat->min = 1000000;
 		stat->max = 0;
