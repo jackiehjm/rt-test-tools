@@ -176,6 +176,8 @@ static int duration = 0;
 static int use_nsecs = 0;
 static int refresh_on_max;
 static int force_sched_other;
+/* FIXME: Use proper cpu_set_t */
+unsigned long affinity_mask;
 
 static char *clockdev_name;
 static int clockdev_fd = -1;
