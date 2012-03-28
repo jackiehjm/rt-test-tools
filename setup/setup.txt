@@ -1,0 +1,603 @@
+RT Virtualization setup
+
+1) Prerequisites
+
+   1.1) Hardware
+
+   	Hardware for Virt-RT must support Intels VT and VT-d
+   	functionality. Accelerator devices which must be shared
+   	between several guest systems must support SR-IOV.
+
+
+   1.2) Distribution
+
+   	There are no special requirements for a Linux distribution to
+   	be used for RT Virtualization, though it's recommended to use
+   	a reasonable up to date distribution to have access to the
+   	latest improvements on libraries and compilers.
+
+	For performance reasons its required to install a 64bit
+	distribution.
+
+
+   1.3) Kernel sources	
+
+   	Kernel sources for a Virt-RT kernel can be obtained here:
+
+	git://git.linutronix.de/users/tglx/linux-rt.git
+
+
+   1.4) Tools, configuration and howtos
+
+   	Tools, kernel configuration files and howtos can be obtained here:
+
+	git://git.linutronix.de/users/tglx/tools.git
+
+
+   1.5) qemu-kvm sources
+
+   	The source code for a Virt-RT enhanced qemu-kvm hypervisor can
+	be obtained here:
+
+	git://git.linutronix.de/users/tglx/qemu-kvm.git
+
+
+2) BIOS tuning
+
+   BIOS settings must be performance optimized. Automatic power saving
+   features must be disabled. Hyperthreading should be disabled.
+
+   It is also recommended to disable Turbomode and C-States, though
+   the latter can be controlled by the host kernel and might be
+   required to be turned on in later implementations. For now
+   disabling is the safe option.
+
+   Detailed BIOS settings for particular hardware systems will be put
+   into per system tuning document.
+
+
+3) Host installation
+
+   3.1)	Basic installation
+
+   	Follow the instructions of your distribution install
+   	mechanism.
+
+	Most distributions allow to install a minimal system which is
+   	the preferred choice, though it's possible to run Virt-RT on a
+   	full blown server or desktop install.
+
+	If you install a minimal system then it might be necessary to
+	manually install required services or tools after the basic
+	installation.
+
+
+   3.2) Post installation tweaks
+
+   	This only covers RT specific tweaks and assumes that basic
+   	sysadmin tasks (e.g. network configuration) have been
+   	performed.
+
+   	3.2.1) Disable non Virt-RT compliant services
+
+	       - irqbalance
+	       - ksm
+	       - ksmtuned
+
+
+	3.2.2) Isolate RT cores
+
+	       For optimal Virt-RT performance it is required to
+	       reserve cores for RT guests. The Linux kernel supports
+	       this with the command line option isolcpus.
+
+	       isolcpus prevents that any userspace service is
+	       scheduled on the reserved cores. This avoids scheduling
+	       overhead and inter processor interrupts. Aside of that
+	       all non RT related device interrupts are directed to
+	       the not reserved cores.
+
+	       The not reserved cores are referred to as housekeeping
+	       cores throughout this document.
+
+	       It is required to have at least one housekeeping core
+	       per CPU socket.
+	       
+	       The number of housekeeping cores required depends on
+	       the workload which needs to be accomplished by those
+	       cores. This includes system daemons, control and
+	       configuration applications.
+
+	       A reasonable starting value is one core per
+	       socket. This can be adjusted when the need arises.
+
+	       Note that core 0 cannot be isolated as this is the boot
+	       core of the Linux kernel.
+
+	       For a single socket system (8 physical cores, no
+	       hyperthreads) add the following to the kernel
+	       commandline in your grub.conf (menu.lst) file:
+
+	       isolcpus=1-7
+
+	       For a dual socket system (16 physical cores, no
+	       hyperthreads) add the following to the kernel
+	       commandline in your grub.conf (menu.lst) file:
+
+	       isolcpus=1-7,9-15
+
+	       This leaves core 0 and core 8, i.e. the first core on
+	       each socket as housekeeping cores which are not used
+	       for Virt-RT processing.
+
+	       For development systems it's recommended to avoid the
+	       isolcpus option for at least one fallback entry in the
+	       grub menu list (usually the entry for the distro
+	       supplied non-RT kernel). This allows full utilization
+	       of the machine for compiling. Otherwise the compile is
+	       restricted to utilize the housekeeping cores of the
+	       machine.
+
+	       Note that tweaking /boot/grub/menu.lst is only valid
+	       for grub v1 based distros. grub v2 has a different
+	       mechanism.
+	
+
+	3.2.3) Security features
+
+	       Security features like SELinux and firewalls affect
+	       only the non-RT part of the system and can be left
+	       enabled.
+
+	       auditd adds overhead to the syscall interfaces and
+	       should be disabled if possible, though if required
+	       auditctl should be used to exclude the RT relevant
+	       syscall interfaces from being audited. Until deeper
+	       investigation of that issue it's recommended to disable
+	       the audit subsystem completely.
+
+
+3) Host RT kernel installation
+
+   3.1) Manual installation
+
+   	This is the recommended method for development.
+
+	Change into the RT base directory for your development machine
+
+	# cd $RT_BASE_DIRECTORY
+
+	RT_BASE_DIRECTORY is an arbitrary path in the file system,
+	though it's recommended to keep it the same on all devel
+	machines. eg. /home/$USER/virt-rt/
+
+	Clone the RT kernel git repository to your machine and
+	checkout the latest release branch.
+
+	# git clone git://git.linutronix.de/users/tglx/linux-rt.git
+
+	If you are installing several machines clone the repository to
+	a local server and clone it from there to save intertubes
+	bandwidth.
+
+	# git clone git://internalserver/gitpath/linux-rt.git
+	or
+	# git clone ssh://internalserver:/gitpath/linux-rt.git
+
+	After the clone change into the kernel source directory and
+	checkout the latest release branch.
+
+	# cd linux-rt
+
+	If you have no information which branch is the latest release
+	branch then you can interrogate via git
+	# git branch -a | grep release
+	
+	This produces a list of entries like:
+	  remotes/origin/release/3.2.12-rt22-kvm
+
+	Now pick the branch you are interested in. When unsure, always
+	pick the branch with the highest version number.
+
+	The checkout command is:
+
+	# git checkout -b mybranch origin/release/3.2.12-rt22-kvm
+
+	Replace "3.2.12-rt22-kvm" with your favourite branch name.
+
+	Create a host-build directory outside of the kernel source
+	directory.
+
+	# cd ..
+	# mkdir host-build
+
+	Clone the tools repository to your machine and checkout the
+	configs branch. Copy the file host-config to the host-build
+	directory.
+
+	# git clone git://git.linutronix.de/users/tglx/tools.git
+	
+	# cd tools
+	# git checkout -b configs origin/configs
+	# cp YOUR-PLATFORM/host-config ../host-build/.config
+
+	Substitute YOUR_PLATFORM with the subdirectory which matches
+	the code name of your platform; e.g. canoe-pass for a "Canoe
+	Pass" system.
+
+	Now go back into your kernel source directory and compile the
+	kernel.
+
+	# cd ../linux-rt
+	
+	# make O=../host-build -j N 
+
+	"O=../host-build" instructs the kernel build system to put the
+	object files and other build relevant files into the directory
+	"../host-build" relative to the kernel source directory. You
+	can also supply absolute pathes to the "O=" option.
+
+	"-j N" is instructing make to spawn N parallel build
+	processes, so you need to replace N with a reasonable number.
+
+	It's a reasonable assumption to say: N = 2 * number of cores
+
+	So for a eight core machine "-j 16" is the probably correct
+	value. Note, that this assumes that you booted the machine
+	without the isolcpus option.
+
+	If you booted into a kernel with the isolcpus option set then
+	N = 2 * number of housekeeping cores.
+
+	When the build has finished you can install your shiny new
+	kernel with:
+
+	# sudo make O=../host-build modules_install
+	# sudo make O=../host-build install
+
+	The leading "sudo" is only required when you are compiling the
+	kernel as regular user, which is highly recommended. In later
+	sections this note is omitted and "sudo" on the example
+	commandline is written as "[sudo]".
+
+	On some distros (older Debian systems) it's required to invoke
+	a distro specific command to make the installation process
+	complete. Newer Debian releases and all Fedora releases do not
+	require this.
+
+
+   3.2) Package based installation
+
+   	This is the recommended method for deployment.
+
+   	Please consult the relevant documentation of your distribution.
+	       
+
+4) Host RT kernel verification
+
+   4.1) Reboot into the newly installed RT Kernel
+
+   
+   4.2) Compile cyclictest
+
+   	Change into the directory which contains the clone of the
+   	tools repository and checkout the cyclictest branch
+
+	# cd $RT_BASE_DIRECTORY/tools
+	# git checkout cyclictest
+	
+	Now compile and install the rt test tools
+
+	# make -j N
+
+	See above for reasonable values of N
+
+	# [sudo] make install
+
+	This installs the test tools to /usr/local/bin/
+	
+	Now cleanup the tools directory with:
+
+	# make distclean
+
+
+   4.3) Run cyclictest
+
+   	cyclictest is a test tool for RT kernels which tests the
+   	latency of periodic tasks.
+
+	Recommended invocation:
+
+	# [sudo] cyclictest -p80 -i1000 -d0 -U -m
+
+	This spawns a test thread on every core and runs it with a
+	period of 1000us. You can tweak the period by adjusting the
+	value of the "-i" commandline parameter
+
+	If your system is configured correctly and you are running the
+	RT kernel then the maximum latencies of all test threads
+	should be in the low microseconds range. On Canoe Pass this is
+	below 20us. The average value on Canoe Pass is 2us for a
+	correctly configured system.
+
+	If there are larger latencies observed, verify that you are
+	running a RT kernel and also verify your BIOS settings.
+
+	You can and should add various loads to your system while
+	running that test. This might be network traffic, disk I/O,
+	compilation jobs or explicit stress tests like hackbench which
+	is included in the rt-tests which have been installed in #4.2
+
+	Recommended invokation of hackbench:
+
+	# hackbench 20
+
+	None of these loads should significantly influence the
+	cyclictest latencies.
+
+
+5) Guest image installation
+
+   The Host installation rules apply to the guest image installation
+   as well, though it's not recommended to install full blown
+   server/desktop images to save disk size.
+
+   5.1) Installation methods
+
+   	5.1.1) Install via virtmanager
+
+   	       This is the most conveniant install method. It's
+	       recommended to do this on a separate machine to avoid
+	       installing the necessary tools on the Virt-RT system.
+	       Goto 5.1.3
+
+
+	5.1.2) Install via commandline
+
+   	       To be documented
+
+
+        5.1.3) Install a prepared guest image
+
+	       Create a directory for your guest kernel image
+	       # cd $RT_BASE_DIRECTORY
+	       # mkdir images
+
+   	       Copy the prepared guest image to the target machine into
+	       the $RT_BASE_DIRECTORY/images/ directory
+
+   	5.1.4) Install a guest image package
+
+   	       Recommended for deployment
+
+	       Not yet supported.
+	       
+
+   5.2) Post installation tweaks
+
+   	Basically the same post installation tweaks as for the host
+   	install apply.
+
+
+	5.2.1) Isolate RT cores
+
+	       For optimal performance and even more for functional
+	       reasons the guest systems require a strict isolation of
+	       RT cores and the housekeeping core.
+
+	       Each guest instance needs at minimum one non RT core
+	       (the housekeeping core) to function. This core runs all
+	       non-RT system services and applications.
+
+	       The same rules for isolcpus apply except that it is not
+	       possible to spawn a guest across sockets. This is a
+	       pure technical limitation as the hardware implicit
+	       latency of cross socket memory access is way to high.
+
+	       Note, that it's not strictly required to tweak the
+	       kernel commandline of a guest in the guest itself.
+
+	       See the section "RT guest invocation" for further
+	       explanation.
+
+
+6) qemu-kvm installation
+
+   6.1) Manual installation
+
+   	This is the recommended method for development.
+
+	Change into the RT base directory for your development machine
+
+	# cd $RT_BASE_DIRECTORY
+
+	Clone the qemu-kvm kernel git repository to your machine and
+	checkout the latest release branch.
+
+	# git clone git://git.linutronix.de/users/tglx/qemu-kvm.git
+
+	If you are installing several machines clone the repository to
+	a local server and clone it from there to save intertubes
+	bandwidth.
+
+	After the clone change into the qemu-kvm source directory and
+	checkout the latest release branch.
+
+	# cd qemu-kvm
+
+	If you have no information which branch is the latest release
+	branch then you can interrogate via git
+	# git branch -a | grep release
+	
+	This produces a list of entries like:
+	  remotes/origin/release/qemu-kvm-rt
+
+	Now pick the branch you are interested in. When unsure, always
+	pick the branch with the highest version number.
+
+	The checkout command is:
+
+	# git checkout -b mybranch origin/release/qemu-kvm-rt
+
+	Replace "qemu-kvm-rt" with your favourite branch name.
+
+	Create a qemu-build directory outside of the source directory.
+
+	# cd ..
+	# mkdir qemu-build
+
+	Now change to the qemu-build directory and configure the build
+
+	# cd qemu-build
+	
+	# ../qemu-kvm/configure
+
+	Now start the build
+
+	# make -j N
+
+	See above for reasonable values of N
+	
+	When the build has finished you can install your shiny new
+	tool with:
+
+	# [sudo] make install
+
+	Note: This installs into /usr/local/ by default and therefor
+	does not clash with a qemu-kvm instance which has been
+	eventually been installed by the distro package management
+	system. The invocation script for the guest will take care of
+	that.
+
+	If you want a different install location then you can supply
+	the installation path to the configure script:
+
+	# ../qemu-kvm/configure --prefix=INSTALLPATH
+
+
+   6.2) Package based installation
+
+   	This is the recommended method for deployment.
+
+   	Please consult the relevant documentation of your distribution.
+   
+
+7) Guest RT kernel installation
+
+   7.1) Manual installation on host
+
+   	This is the recommended method for development.
+
+	Change into the kernel source directory (see Host RT kernel
+	installation)
+
+	Create a guest-build directory outside of the kernel source
+	directory.
+
+	# cd ..
+	# mkdir guest-build
+
+	Change into the tools directory (see Host RT kernel
+	installation), checkout the configs branch and copy the guest
+	configuration to the guest-build directory
+
+	# cd tools
+	# git checkout -b configs origin/configs
+	# cp YOUR-PLATFORM/guest-config ../guest-build/.config
+
+	Substitute YOUR_PLATFORM with the subdirectory which matches
+	the code name of your platfor; e.g. canoe-pass for a "Canoe
+	Pass" system.
+
+	Now go back into your kernel source directory and compile the
+	kernel.
+
+	# cd ../linux-rt
+	
+	# make O=../guest-build -j N 
+
+	See above for reasonable values of N
+
+	Copy the resulting kernel image to the images directory
+
+	# cp ../guest-build/arch/x86/boot/bzImage ../images
+
+
+   7.2) Manual installation on guest
+
+   	Not yet supported.
+
+
+   7.3) Package based installation
+
+   	This is the recommended method for deployment.
+
+	Not yet supported.
+
+
+8) Guest invocation
+
+   8.1) Manual invocation
+
+   	At the moment this is the only supported invocation method
+   	because libvirt and virtmanager do not support the required
+   	options and enhancements of Virt-RT yet.
+
+	Check out the branch "startscripts" in the tools directory and
+	copy the script kvmqemu.sh to $RT_BASE_DIRECTORY
+
+	# cd tools
+	# git checkout startscripts
+	# cp kvmqemu.sh ../
+
+	Go to RT_BASE_DIRECTORY and edit the start script
+	# cd ..
+	# $EDITOR kvmqemu.sh
+
+	Adjust the variables in the script to fit your
+	environment. The purpose of the variables is explained in the
+	script itself.
+
+	Now start the guest.
+
+	# [sudo] ./kvmqemu.sh
+
+
+   8.2) virtmanager invocation
+
+   	Not yet supported
+
+
+9) Basic guest testing
+
+   9.1) cyclictest
+
+   	Either transfer the cyclictest executable from the host to the
+   	guest with scp or wget or mount an NFS export in the guest
+   	which contains cyclictest
+
+	Recommended invocation:
+	
+	# [sudo] cyclictest -p80 -i1000 -d0 -m -S -A CPUMASK
+
+	CPUMASK is a hex value which tells cyclictest on which vcpus
+	the test threads should run. This cpumask should exclude the
+	guest housekeeping core. For a 4 vcpus guest with one
+	housekeeping core the CPUMASK is 0x0e
+
+	This spawns a test thread on every vcpu which is selected in
+	CPUMASK and runs it with a period of 1000us. You can tweak the
+	period by adjusting the value of the "-i" commandline
+	parameter
+
+	If your system is configured correctly and you are running the
+	RT kernel then the maximum latencies of all test threads
+	should be in the low microseconds range. On Canoe Pass this is
+	below 60us. The average value on Canoe Pass is around 25us for
+	a correctly configured system.
+
+	
+  9.2) Device pass through testing
+
+       Not yet documented.
+
