@@ -525,7 +525,10 @@ RT Virtualization setup
 
    7.2) Manual installation on guest
 
-   	Not yet supported.
+   	Follow the instructions for "Host kernel installation".
+
+	The only difference is that you have to use the "guest-config"
+	instead of the "host-config". All other steps are identical.
 
 
    7.3) Package based installation
@@ -537,11 +540,11 @@ RT Virtualization setup
 
 8) Guest invocation
 
-   8.1) Manual invocation
+   At the moment manual invocation is the only supported invocation
+   method because libvirt and virtmanager do not support the required
+   options and enhancements of Virt-RT yet.
 
-   	At the moment this is the only supported invocation method
-   	because libvirt and virtmanager do not support the required
-   	options and enhancements of Virt-RT yet.
+   8.1) Manual invocation with bzImage based kernel
 
 	Check out the branch "startscripts" in the tools directory and
 	copy the script kvmqemu.sh to $RT_BASE_DIRECTORY
@@ -562,8 +565,29 @@ RT Virtualization setup
 
 	# [sudo] ./kvmqemu.sh
 
+   8.2) Manual invocation with kernel on the guest filesystem
 
-   8.2) virtmanager invocation
+	Check out the branch "startscripts" in the tools directory and
+	copy the script kvmqemu-rfs.sh to $RT_BASE_DIRECTORY
+
+	# cd tools
+	# git checkout startscripts
+	# cp kvmqemu-rfs.sh ../
+
+	Go to RT_BASE_DIRECTORY and edit the start script
+	# cd ..
+	# $EDITOR kvmqemu-rfs.sh
+
+	Adjust the variables in the script to fit your
+	environment. The purpose of the variables is explained in the
+	script itself.
+
+	Now start the guest.
+
+	# [sudo] ./kvmqemu-rfs.sh
+   		
+
+   8.3) virtmanager invocation
 
    	Not yet supported
 
@@ -599,5 +623,28 @@ RT Virtualization setup
 	
   9.2) Device pass through testing
 
-       Not yet documented.
+       Copy the FPGA driver source to your guest RFS and build it with
+       the build script.
+
+       Load the driver with:
+
+       # [sudo] insmod $PATH_TO_BUILD_DIR/ILatIntDrv.ko
+
+       Start the test application
+
+       # [sudo] $PATH_TO_BUILD_DIR/testLatency
+
+       Follow the instructions on screen.
+
+
+10) MSI latency optimization
+
+    Add "highres=off" to both the guest and the host kernel command
+    line.
+
+    This disables high resolution timers, so further testing with
+    cyclictest is not possible, but the overhead of high resolution
+    timers is reduced and MSI latency is optimized.
+
+
 
