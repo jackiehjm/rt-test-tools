@@ -157,6 +157,13 @@ RT Virtualization setup
 	       the audit subsystem completely.
 
 
+	3.2.4) TSC optmization
+
+	       Add "tsc=perfect" to the kernel command line on the
+	       host and the guest. This disables special TSC
+	       verification mechanisms which can influence latencies.
+
+
 3) Host RT kernel installation
 
    3.1) Manual installation
@@ -586,6 +593,10 @@ RT Virtualization setup
 
 	# [sudo] ./kvmqemu-rfs.sh
    		
+	Note: The command line options which are relevant for RT need
+	to be added in the guest (modify /boot/grub/menu.lst)
+
+	   "isolcpus=NNN tsc=perfect"
 
    8.3) virtmanager invocation
 
